@@ -1,0 +1,392 @@
+{
+  "name": "Radar Leitura V2 - Trends > AI Agent > Google Books > Supabase",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "A cada 4 horas",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1180,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://trends.google.com/trending/rss?geo=BR"
+      },
+      "id": "rss-trends",
+      "name": "Google Trends Brasil RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        -960,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const j = item.json || {};\n  const title = j.title || j.name || j.query || '';\n  const description = j.contentSnippet || j.content || j.description || '';\n  const sourceUrl = j.link || j.guid || 'https://trends.google.com/trending?geo=BR';\n  const publishedAt = j.isoDate || j.pubDate || new Date().toISOString();\n\n  return {\n    json: {\n      trend_title: String(title).trim(),\n      trend_description: String(description || '').slice(0, 4000),\n      source_url: sourceUrl,\n      observed_at: new Date(publishedAt).toISOString()\n    }\n  };\n}).filter(i => i.json.trend_title);"
+      },
+      "id": "normalize",
+      "name": "Normalizar tendência",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -740,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você é um analista de tendências do mercado editorial brasileiro.\n\nAnalise a tendência abaixo:\n\nTÍTULO: {{ $json.trend_title }}\nCONTEXTO: {{ $json.trend_description }}\n\nSua tarefa é decidir se essa tendência tem relação REAL com:\n- livros\n- autores\n- literatura\n- editoras\n- adaptações de livros\n- gêneros literários\n- temas que possam gerar interesse em livros\n\nNão force relação. Futebol, política, celebridades e assuntos gerais devem ser considerados irrelevantes quando não houver ligação editorial clara.\n\nRetorne SOMENTE JSON válido, sem markdown e sem texto extra, exatamente neste formato:\n{\n  \"relevant\": true,\n  \"entity_type\": \"book|author|topic|segment|adaptation|other\",\n  \"name\": \"nome canônico da entidade\",\n  \"author_name\": null,\n  \"categories\": [],\n  \"reason\": \"por que isso está em alta e qual a relação editorial\",\n  \"content_opportunity\": \"ideia curta de conteúdo para o marketing\",\n  \"site_segment\": \"possível segmento ou vitrine do site, ou null\",\n  \"confidence\": 0\n}\n\nRegras:\n- confidence: inteiro de 0 a 100\n- relevant só pode ser true se houver relação editorial clara\n- se for livro, use o título do livro em name\n- se for autor, use o nome do autor em name\n- categories deve ser uma lista de gêneros/temas quando aplicável"
+      },
+      "id": "ai-agent",
+      "name": "AI Agent - Filtrar Editorial",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -500,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "gemini-model",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map((item, index) => {\n  const base = $('Normalizar tendência').itemMatching(index).json;\n  const raw = item.json?.output ?? item.json?.text ?? item.json?.response ?? item.json;\n\n  let text = typeof raw === 'string' ? raw : JSON.stringify(raw);\n  text = text.replace(/^```json\\s*/i, '').replace(/^```\\s*/i, '').replace(/```$/i, '').trim();\n\n  let ai;\n  try {\n    ai = JSON.parse(text);\n  } catch (e) {\n    ai = {\n      relevant: false,\n      entity_type: 'other',\n      name: base.trend_title,\n      author_name: null,\n      categories: [],\n      reason: 'Não foi possível interpretar a resposta da IA.',\n      content_opportunity: '',\n      site_segment: null,\n      confidence: 0\n    };\n  }\n\n  return {\n    json: {\n      ...base,\n      relevant: ai.relevant === true,\n      entity_type: ai.entity_type || 'other',\n      entity_name: ai.name || base.trend_title,\n      author_name: ai.author_name || null,\n      categories: Array.isArray(ai.categories) ? ai.categories : [],\n      reason: ai.reason || '',\n      content_opportunity: ai.content_opportunity || '',\n      site_segment: ai.site_segment || null,\n      confidence: Number(ai.confidence || 0)\n    }\n  };\n});"
+      },
+      "id": "parse-ai",
+      "name": "Interpretar IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -250,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "rel",
+              "leftValue": "={{ $json.relevant }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "conf",
+              "leftValue": "={{ $json.confidence }}",
+              "rightValue": 60,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-editorial",
+      "name": "É editorial?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/books/v1/volumes",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.entity_type === 'book' ? 'intitle:' + $json.entity_name : $json.entity_type === 'author' ? 'inauthor:' + $json.entity_name : $json.entity_name }}"
+            },
+            {
+              "name": "langRestrict",
+              "value": "pt"
+            },
+            {
+              "name": "maxResults",
+              "value": "5"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "google-books",
+      "name": "Google Books - Enriquecer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        250,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map((item, index) => {\n  const base = $('É editorial?').itemMatching(index).json;\n  const gb = item.json || {};\n  const first = Array.isArray(gb.items) && gb.items.length ? gb.items[0] : null;\n  const info = first?.volumeInfo || {};\n  const ids = Array.isArray(info.industryIdentifiers) ? info.industryIdentifiers : [];\n  const isbn13 = ids.find(x => x.type === 'ISBN_13')?.identifier || null;\n\n  const googleCategories = Array.isArray(info.categories) ? info.categories : [];\n  const categories = [...new Set([...(base.categories || []), ...googleCategories])];\n\n  const canonicalTitle =\n    base.entity_type === 'book' && first?.volumeInfo?.title\n      ? first.volumeInfo.title\n      : base.entity_name;\n\n  const canonicalAuthor =\n    Array.isArray(info.authors) && info.authors.length\n      ? info.authors.join(', ')\n      : base.author_name;\n\n  const keyName = String(canonicalTitle || base.entity_name).trim().toLowerCase();\n  const datePart = String(base.observed_at || new Date().toISOString()).slice(0, 10);\n\n  return {\n    json: {\n      ...base,\n      entity_name: canonicalTitle,\n      author_name: canonicalAuthor || null,\n      google_books_found: !!first,\n      google_books_id: first?.id || null,\n      isbn13,\n      publisher: info.publisher || null,\n      image_url: info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || null,\n      categories,\n      dedupe_key: `google_trends|${keyName}|${datePart}`,\n      metadata: {\n        trend_description: base.trend_description,\n        google_books: first ? {\n          id: first.id || null,\n          publishedDate: info.publishedDate || null,\n          description: info.description || null,\n          infoLink: info.infoLink || null\n        } : {}\n      }\n    }\n  };\n});"
+      },
+      "id": "prepare",
+      "name": "Preparar candidato",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        490,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "radar_candidates",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "dedupe_key",
+              "fieldValue": "={{ $json.dedupe_key }}"
+            },
+            {
+              "fieldId": "trend_title",
+              "fieldValue": "={{ $json.trend_title }}"
+            },
+            {
+              "fieldId": "entity_type",
+              "fieldValue": "={{ $json.entity_type }}"
+            },
+            {
+              "fieldId": "entity_name",
+              "fieldValue": "={{ $json.entity_name }}"
+            },
+            {
+              "fieldId": "author_name",
+              "fieldValue": "={{ $json.author_name }}"
+            },
+            {
+              "fieldId": "categories",
+              "fieldValue": "={{ $json.categories }}"
+            },
+            {
+              "fieldId": "reason",
+              "fieldValue": "={{ $json.reason }}"
+            },
+            {
+              "fieldId": "content_opportunity",
+              "fieldValue": "={{ $json.content_opportunity }}"
+            },
+            {
+              "fieldId": "site_segment",
+              "fieldValue": "={{ $json.site_segment }}"
+            },
+            {
+              "fieldId": "confidence",
+              "fieldValue": "={{ $json.confidence }}"
+            },
+            {
+              "fieldId": "observed_at",
+              "fieldValue": "={{ $json.observed_at }}"
+            },
+            {
+              "fieldId": "source_url",
+              "fieldValue": "={{ $json.source_url }}"
+            },
+            {
+              "fieldId": "google_books_found",
+              "fieldValue": "={{ $json.google_books_found }}"
+            },
+            {
+              "fieldId": "google_books_id",
+              "fieldValue": "={{ $json.google_books_id }}"
+            },
+            {
+              "fieldId": "isbn13",
+              "fieldValue": "={{ $json.isbn13 }}"
+            },
+            {
+              "fieldId": "publisher",
+              "fieldValue": "={{ $json.publisher }}"
+            },
+            {
+              "fieldId": "image_url",
+              "fieldValue": "={{ $json.image_url }}"
+            },
+            {
+              "fieldId": "metadata",
+              "fieldValue": "={{ $json.metadata }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "new"
+            },
+            {
+              "fieldId": "last_seen_at",
+              "fieldValue": "={{ $json.observed_at }}"
+            }
+          ]
+        }
+      },
+      "id": "supabase-create",
+      "name": "Supabase - Gravar candidato",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        760,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "A cada 4 horas": {
+      "main": [
+        [
+          {
+            "node": "Google Trends Brasil RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Trends Brasil RSS": {
+      "main": [
+        [
+          {
+            "node": "Normalizar tendência",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar tendência": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Filtrar Editorial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent - Filtrar Editorial",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Filtrar Editorial": {
+      "main": [
+        [
+          {
+            "node": "Interpretar IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar IA": {
+      "main": [
+        [
+          {
+            "node": "É editorial?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É editorial?": {
+      "main": [
+        [
+          {
+            "node": "Google Books - Enriquecer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Google Books - Enriquecer": {
+      "main": [
+        [
+          {
+            "node": "Preparar candidato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar candidato": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Gravar candidato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
