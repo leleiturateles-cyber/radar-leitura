@@ -382,26 +382,17 @@
     }
 
     .visual{
-      height:260px;
-      background:#edf0f5;
+      max-height:320px;
+      background:#f7f8fa;
       overflow:hidden;
-      display:grid;
-      place-items:center;
       margin-bottom:18px;
     }
     .visual img{
+      display:block;
       width:100%;
-      height:100%;
-      object-fit:contain;
+      max-height:320px;
+      object-fit:cover;
       background:#f7f8fa;
-    }
-    .visual.placeholder{
-      color:var(--blue);
-      font-weight:900;
-      font-size:26px;
-      letter-spacing:.04em;
-      background:
-        linear-gradient(135deg,#edf2ff,#f8f9fc 48%,#eef1f7);
     }
 
     .card-meta{
@@ -1286,11 +1277,11 @@
                   src="${esc(image)}"
                   alt=""
                   loading="lazy"
-                  onerror="this.parentElement.outerHTML='<div class=&quot;visual placeholder&quot;>SE LIGA</div>'"
+                  onerror="this.parentElement.remove()"
                 >
               </div>
             `
-            : `<div class="visual placeholder">SE LIGA</div>`
+            : ''
           }
 
           <div class="card-meta">
@@ -1397,15 +1388,13 @@
     const cat = dashboardCategory(row);
 
     $('modalBody').innerHTML = `
-      <div>
-        ${
-          image
-          ? `<img class="modal-cover" src="${esc(image)}" alt="">`
-          : `<div class="modal-cover visual placeholder">SE LIGA</div>`
-        }
-      </div>
+      ${
+        image
+        ? `<div><img class="modal-cover" src="${esc(image)}" alt="" onerror="this.parentElement.remove()"></div>`
+        : ''
+      }
 
-      <div>
+      <div ${image ? '' : 'style="grid-column:1/-1"'} >
         <div class="card-meta">
           ${isNew(row) ? `<span class="pill new">Novo</span>` : ''}
           <span class="pill ${pillClass(cat)}">${esc(categoryLabel(cat))}</span>
