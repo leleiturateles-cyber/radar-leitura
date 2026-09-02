@@ -764,9 +764,9 @@
           <div id="segmentsList" class="side-list"></div>
         </div>
 
-        <div class="side-card">
+        <div id="opportunitiesCard" class="side-card">
           <h3>Oportunidades</h3>
-          <div class="side-subtitle">maior confiança no filtro atual</div>
+          <div class="side-subtitle">prioridades gerais do radar</div>
           <div id="opportunityList" class="side-list"></div>
         </div>
 
@@ -970,6 +970,59 @@
     return url.replace(/^http:\/\//i,'https://');
   }
 
+  function publicationImage(row){
+    const meta = parseMetadata(row.metadata);
+
+    const candidates = [
+      row.image_url,
+      meta.image_url,
+      meta.source_image,
+      meta.og_image,
+      meta.thumbnail,
+      meta.thumb,
+      meta.media_thumbnail,
+      meta.media_content,
+      meta.enclosure_url,
+      meta.cover_url
+    ];
+
+    for (const value of candidates) {
+      if (!value) continue;
+
+      if (typeof value === 'string') {
+        const cleaned = coverUrl(value);
+        if (cleaned) return cleaned;
+      }
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === 'string' && item) {
+            const cleaned = coverUrl(item);
+            if (cleaned) return cleaned;
+          }
+
+          if (item && typeof item === 'object') {
+            const nested = item.url || item.href || item.src;
+            if (nested) {
+              const cleaned = coverUrl(nested);
+              if (cleaned) return cleaned;
+            }
+          }
+        }
+      }
+
+      if (value && typeof value === 'object') {
+        const nested = value.url || value.href || value.src;
+        if (nested) {
+          const cleaned = coverUrl(nested);
+          if (cleaned) return cleaned;
+        }
+      }
+    }
+
+    return '';
+  }
+
   function sourceLabel(row){
     const meta = parseMetadata(row.metadata);
     const src = lc(meta.source_type || '');
@@ -1124,6 +1177,11 @@
     });
 
     $('feedTitle').textContent = categoryLabel(activeCategory);
+
+    const opportunitiesCard = $('opportunitiesCard');
+    if(opportunitiesCard){
+      opportunitiesCard.classList.toggle('hidden', activeCategory !== 'all');
+    }
   }
 
   function renderKpis(){
@@ -1158,7 +1216,7 @@
     }
 
     $('trendList').innerHTML = rows.map(row=>{
-      const image = coverUrl(row.image_url);
+      const image = publicationImage(row);
       const title = row.entity_name || row.trend_title || 'Sem título';
       const score = Math.round(Number(row.confidence || 0));
       const cat = dashboardCategory(row);
@@ -1261,9 +1319,13 @@
   }
 
   function renderOpportunities(){
-    const rows = filteredRows()
+    const rows = allRows
       .filter(r=>r.content_opportunity)
-      .sort((a,b)=>Number(b.confidence||0)-Number(a.confidence||0))
+      .sort((a,b)=>{
+        const conf = Number(b.confidence||0) - Number(a.confidence||0);
+        if(conf !== 0) return conf;
+        return new Date(recordDate(b)||0) - new Date(recordDate(a)||0);
+      })
       .slice(0,6);
 
     $('opportunityList').innerHTML = rows.length
@@ -1273,11 +1335,11 @@
             <p>${esc(r.content_opportunity)}</p>
           </div>
         `).join('')
-      : '<div class="side-item"><p>Sem sugestões neste filtro.</p></div>';
+      : '<div class="side-item"><p>Sem sugestões ainda.</p></div>';
   }
 
   function openModal(row){
-    const image = coverUrl(row.image_url);
+    const image = publicationImage(row);
     const categories = Array.isArray(row.categories)
       ? row.categories.join(' • ')
       : '';
